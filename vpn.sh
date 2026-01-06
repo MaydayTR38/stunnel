@@ -930,6 +930,244 @@ systemctl enable xray > /dev/null 2>&1
 echo -e "${GREEN}✓ V2Ray (VLESS) kuruldu (Port: 8443)${NC}"
 }
 
+# BadVPN kurulumu (UDP Desteği)
+install_badvpn() {
+echo -e "\n${YELLOW}[Ek] BadVPN (UDP Desteği) kuruluyor...${NC}"
+
+wget -O /usr/bin/badvpn-udpgw "https://raw.githubusercontent.com/daybreakersx/premscript/master/badvpn-udpgw64" > /dev/null 2>&1
+chmod +x /usr/bin/badvpn-udpgw
+
+cat > /etc/systemd/system/badvpn.service << EOF
+[Unit]
+Description=BadVPN UDP Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 10
+User=root
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start badvpn
+systemctl enable badvpn > /dev/null 2>&1
+
+echo -e "${GREEN}✓ BadVPN kuruldu (UDP Gateway Port: 7300)${NC}"
+}
+
+# Online kullanıcıları göster
+show_online_users() {
+echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${WHITE} ONLINE KULLANICILAR${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+
+printf "%-20s %-15s %-10s\n" "KULLANICI" "DURUM" "PID"
+echo "─────────────────────────────────────────────────────────────"
+
+found=0
+while IFS=: read -r username _ uid _; do
+if [[ $uid -ge 1000 && "$username" != "nobody" ]]; then
+if pgrep -u "$username" > /dev/null 2>&1; then
+pids=$(pgrep -u "$username" | head -n 1) # İlk PID'yi al
+printf "%-20s %-15b %-10s\n" "$username" "${GREEN}● Çevrimiçi${NC}" "$pids"
+found=1
+fi
+fi
+done < /etc/passwd
+
+if [[ $found -eq 0 ]]; then
+echo -e "${YELLOW}Şu an bağlı kullanıcı yok.${NC}"
+fi
+echo ""
+}
+
+# Oto-Reboot yapılandırması
+configure_autoreboot() {
+echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${WHITE} OTO-REBOOT AYARLARI${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+
+echo -e "Sunucunun her gece 00:00'da otomatik yeniden başlatılması"
+echo -e "performansı korur ve RAM şişmesini önler.\n"
+
+if [ -f /etc/cron.d/vpn_autoreboot ]; then
+echo -e "Mevcut Durum: ${GREEN}AKTİF${NC}"
+else
+echo -e "Mevcut Durum: ${RED}PASİF${NC}"
+fi
+echo ""
+
+read -p "Oto-Reboot durumu değiştirilsin mi? (e/h): " choice
+
+if [[ "$choice" == "e" || "$choice" == "E" ]]; then
+if [ -f /etc/cron.d/vpn_autoreboot ]; then
+rm -f /etc/cron.d/vpn_autoreboot
+echo -e "\n${YELLOW}Oto-Reboot iptal edildi.${NC}"
+else
+echo "0 0 * * * root /sbin/reboot" > /etc/cron.d/vpn_autoreboot
+service cron restart > /dev/null 2>&1
+echo -e "\n${GREEN}✓ Oto-Reboot aktif edildi (Her gece 00:00)${NC}"
+fi
+fi
+}
+
+# Hız Testi
+run_speedtest() {
+echo -e "\n${YELLOW}Hız testi başlatılıyor...${NC}"
+echo -e "Lütfen bekleyin, bu işlem biraz sürebilir.\n"
+
+if ! command -v speedtest-cli &> /dev/null; then
+echo -e "Speedtest aracı kuruluyor..."
+apt install speedtest-cli -y > /dev/null 2>&1
+fi
+
+speedtest-cli --simple
+echo ""
+}
+
+# Sistem Temizliği
+clean_system() {
+echo -e "\n${YELLOW}Sistem temizleniyor...${NC}"
+
+# RAM Cache Temizliği
+sync; echo 3 > /proc/sys/vm/drop_caches
+echo -e " ${GREEN}✓${NC} RAM Önbelleği temizlendi"
+
+# Swap Temizliği
+swapoff -a && swapon -a 2>/dev/null
+echo -e " ${GREEN}✓${NC} Swap alanı temizlendi"
+
+# Log Temizliği
+journalctl --vacuum-time=1d > /dev/null 2>&1
+rm -rf /var/log/*.gz > /dev/null 2>&1
+echo -e " ${GREEN}✓${NC} Eski loglar temizlendi"
+
+# Paket Önbelleği
+apt autoremove -y > /dev/null 2>&1
+apt clean -y > /dev/null 2>&1
+echo -e " ${GREEN}✓${NC} Paket artıkları temizlendi"
+
+echo -e "\n${GREEN}Temizlik tamamlandı!${NC}\n"
+}
+
+# Script Güncelleme
+update_script() {
+echo -e "\n${YELLOW}Script güncelleme kontrol ediliyor...${NC}"
+
+# BURAYA KENDİ GITHUB RAW URL'NİZİ YAZMALISINIZ
+UPDATE_URL="https://raw.githubusercontent.com/MaydayTR38/stunnel/refs/heads/main/vpn.sh"
+
+# Yedek al
+cp "$0" "${0}.backup"
+
+echo -e "Güncelleme indiriliyor..."
+if wget -q "$UPDATE_URL" -O /tmp/vpn-new.sh; then
+if [ -s /tmp/vpn-new.sh ]; then
+mv /tmp/vpn-new.sh "$0"
+chmod +x "$0"
+echo -e "${GREEN}✓ Script başarıyla güncellendi!${NC}"
+echo -e "Script yeniden başlatılıyor...\n"
+sleep 2
+exec "$0"
+else
+echo -e "${RED}Hata: İndirilen dosya boş!${NC}"
+mv "${0}.backup" "$0"
+fi
+else
+echo -e "${RED}Hata: Güncelleme sunucusuna bağlanılamadı!${NC}"
+fi
+echo ""
+}
+
+# V2Ray (Xray) Kurulumu - VLESS
+install_v2ray() {
+echo -e "\n${YELLOW}[Ek] V2Ray (VLESS) kuruluyor...${NC}"
+
+# Xray indir
+mkdir -p /usr/local/xray
+cd /usr/local/xray
+wget -q -O xray.zip "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
+unzip -q xray.zip
+chmod +x xray
+rm xray.zip
+
+# UUID oluştur
+UUID=$(uuidgen)
+echo "$UUID" > /usr/local/xray/uuid
+
+# Config oluştur (VLESS-WS-TLS)
+cat > /usr/local/xray/config.json << EOF
+{
+"log": {
+"loglevel": "warning"
+},
+"inbounds": [
+{
+"port": 8443,
+"protocol": "vless",
+"settings": {
+"clients": [
+{
+"id": "$UUID",
+"level": 0
+}
+],
+"decryption": "none"
+},
+"streamSettings": {
+"network": "ws",
+"security": "tls",
+"tlsSettings": {
+"certificates": [
+{
+"certificateFile": "/etc/stunnel/stunnel.crt",
+"keyFile": "/etc/stunnel/stunnel.key"
+}
+]
+},
+"wsSettings": {
+"path": "/vless"
+}
+}
+}
+],
+"outbounds": [
+{
+"protocol": "freedom"
+}
+]
+}
+EOF
+
+# Systemd servisi
+cat > /etc/systemd/system/xray.service << EOF
+[Unit]
+Description=Xray Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/usr/local/xray
+ExecStart=/usr/local/xray/xray run -c /usr/local/xray/config.json
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start xray
+systemctl enable xray > /dev/null 2>&1
+
+echo -e "${GREEN}✓ V2Ray (VLESS) kuruldu (Port: 8443)${NC}"
+}
+
 # Ana menü
 main_menu() {
 while true; do
