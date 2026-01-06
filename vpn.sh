@@ -104,7 +104,7 @@ if ! grep -q "/bin/false" /etc/shells; then
 echo "/bin/false" >> /etc/shells
 fi
 
-PACKAGES="wget curl openssl stunnel4 dropbear openssh-server python3 net-tools ufw fail2ban lsb-release"
+PACKAGES="wget curl openssl stunnel4 dropbear openssh-server python3 net-tools ufw fail2ban lsb-release uuid-runtime unzip"
 
 for pkg in $PACKAGES; do
 apt install -y $pkg > /dev/null 2>&1
@@ -408,6 +408,7 @@ ufw allow $WS_PORT/tcp > /dev/null 2>&1
 ufw allow $DROPBEAR_PORT/tcp > /dev/null 2>&1
 ufw allow $SSL_PORT/tcp > /dev/null 2>&1
 ufw allow $OPENSSH_SSL_PORT/tcp > /dev/null 2>&1
+ufw allow 8443/tcp > /dev/null 2>&1
 
 echo "y" | ufw enable > /dev/null 2>&1
 
@@ -585,12 +586,17 @@ echo -e "${GREEN}✓ Tüm servisler yeniden başlatıldı${NC}"
 # Bağlantı bilgileri
 show_connection_info() {
 IP=$(curl -s ifconfig.me 2>/dev/null || echo "Bilinmiyor")
+UUID=$(cat /usr/local/xray/uuid 2>/dev/null || echo "Kurulu Değil")
 
 echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${WHITE} HTTP INJECTOR / HTTP CUSTOM AYARLARI${NC}"
+echo -e "${WHITE} BAĞLANTI AYARLARI${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
 
-echo -e "${YELLOW}▸ SSL/TLS Bağlantısı (Port 443):${NC}"
+echo -e "${YELLOW}▸ V2Ray (VLESS) [En Hızlı & Modern]:${NC}"
+echo -e " URL: vless://$UUID@$IP:8443?security=tls&encryption=none&type=ws&path=/vless&sni=$IP#V2Ray-VPN"
+echo -e " (Bu linki kopyalayıp uygulamaya yapıştırın)"
+
+echo -e "\n${YELLOW}▸ SSL/TLS Bağlantısı (Port 443):${NC}"
 echo -e " Host: $IP"
 echo -e " Port: $SSL_PORT"
 echo -e " SSL: Açık"
@@ -633,6 +639,11 @@ fi
 
 echo -e "\n${YELLOW}Kaldırılıyor...${NC}"
 
+systemctl stop xray 2>/dev/null
+systemctl disable xray 2>/dev/null
+rm -rf /usr/local/xray
+rm -f /etc/systemd/system/xray.service
+
 systemctl stop ws-proxy 2>/dev/null
 systemctl stop stunnel4 2>/dev/null
 systemctl stop dropbear 2>/dev/null
@@ -668,6 +679,7 @@ create_ssl_certificate
 configure_stunnel
 install_websocket
 install_badvpn
+install_v2ray
 configure_firewall
 enable_bbr
 
@@ -805,6 +817,119 @@ echo -e " ${GREEN}✓${NC} Paket artıkları temizlendi"
 echo -e "\n${GREEN}Temizlik tamamlandı!${NC}\n"
 }
 
+# Script Güncelleme
+update_script() {
+echo -e "\n${YELLOW}Script güncelleme kontrol ediliyor...${NC}"
+
+# BURAYA KENDİ GITHUB RAW URL'NİZİ YAZMALISINIZ
+UPDATE_URL="https://raw.githubusercontent.com/MaydayTR38/stunnel/refs/heads/main/vpn.sh"
+
+# Yedek al
+cp "$0" "${0}.backup"
+
+echo -e "Güncelleme indiriliyor..."
+if wget -q "$UPDATE_URL" -O /tmp/vpn-new.sh; then
+if [ -s /tmp/vpn-new.sh ]; then
+mv /tmp/vpn-new.sh "$0"
+chmod +x "$0"
+echo -e "${GREEN}✓ Script başarıyla güncellendi!${NC}"
+echo -e "Script yeniden başlatılıyor...\n"
+sleep 2
+exec "$0"
+else
+echo -e "${RED}Hata: İndirilen dosya boş!${NC}"
+mv "${0}.backup" "$0"
+fi
+else
+echo -e "${RED}Hata: Güncelleme sunucusuna bağlanılamadı!${NC}"
+fi
+echo ""
+}
+
+# V2Ray (Xray) Kurulumu - VLESS
+install_v2ray() {
+echo -e "\n${YELLOW}[Ek] V2Ray (VLESS) kuruluyor...${NC}"
+
+# Xray indir
+mkdir -p /usr/local/xray
+cd /usr/local/xray
+wget -q -O xray.zip "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
+unzip -q xray.zip
+chmod +x xray
+rm xray.zip
+
+# UUID oluştur
+UUID=$(uuidgen)
+echo "$UUID" > /usr/local/xray/uuid
+
+# Config oluştur (VLESS-WS-TLS)
+cat > /usr/local/xray/config.json << EOF
+{
+"log": {
+"loglevel": "warning"
+},
+"inbounds": [
+{
+"port": 8443,
+"protocol": "vless",
+"settings": {
+"clients": [
+{
+"id": "$UUID",
+"level": 0
+}
+],
+"decryption": "none"
+},
+"streamSettings": {
+"network": "ws",
+"security": "tls",
+"tlsSettings": {
+"certificates": [
+{
+"certificateFile": "/etc/stunnel/stunnel.crt",
+"keyFile": "/etc/stunnel/stunnel.key"
+}
+]
+},
+"wsSettings": {
+"path": "/vless"
+}
+}
+}
+],
+"outbounds": [
+{
+"protocol": "freedom"
+}
+]
+}
+EOF
+
+# Systemd servisi
+cat > /etc/systemd/system/xray.service << EOF
+[Unit]
+Description=Xray Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/usr/local/xray
+ExecStart=/usr/local/xray/xray run -c /usr/local/xray/config.json
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start xray
+systemctl enable xray > /dev/null 2>&1
+
+echo -e "${GREEN}✓ V2Ray (VLESS) kuruldu (Port: 8443)${NC}"
+}
+
 # Ana menü
 main_menu() {
 while true; do
@@ -826,11 +951,12 @@ echo -e "${WHITE}║${NC} ${GREEN}[9]${NC} BBR Aktifleştir ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${GREEN}[10]${NC} Oto-Reboot Ayarı ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${GREEN}[11]${NC} Sunucu Hız Testi ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${GREEN}[12]${NC} Sistem Temizliği (RAM/Log) ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${RED}[13]${NC} Kaldır ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${BLUE}[13]${NC} Scripti Güncelle ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${RED}[14]${NC} Kaldır ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${PURPLE}[0]${NC} Çıkış ${WHITE}║${NC}"
 echo -e "${WHITE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-read -p "Seçiminiz [0-13]: " choice
+read -p "Seçiminiz [0-14]: " choice
 
 case $choice in
 1) full_install; read -p "Devam etmek için Enter'a basın..." ;;
@@ -845,7 +971,8 @@ case $choice in
 10) configure_autoreboot; read -p "Devam etmek için Enter'a basın..." ;;
 11) run_speedtest; read -p "Devam etmek için Enter'a basın..." ;;
 12) clean_system; read -p "Devam etmek için Enter'a basın..." ;;
-13) uninstall; read -p "Devam etmek için Enter'a basın..." ;;
+13) update_script; read -p "Devam etmek için Enter'a basın..." ;;
+14) uninstall; read -p "Devam etmek için Enter'a basın..." ;;
 0) echo -e "\n${GREEN}Görüşmek üzere!${NC}\n"; exit 0 ;;
 *) echo -e "${RED}Geçersiz seçim!${NC}"; sleep 1 ;;
 esac
