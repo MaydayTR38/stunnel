@@ -253,120 +253,120 @@ active_connections = 0
 lock = threading.Lock()
 
 def log(message):
-print(f"[WS-PROXY] {message}")
+    print(f"[WS-PROXY] {message}")
 
 def handle_client(client_socket, client_address):
-global active_connections
+    global active_connections
 
-with lock:
-active_connections += 1
+    with lock:
+        active_connections += 1
 
-try:
-# HTTP isteğini al
-request = client_socket.recv(BUFFER_SIZE)
+    try:
+        # HTTP isteğini al
+        request = client_socket.recv(BUFFER_SIZE)
 
-if not request:
-return
+        if not request:
+            return
 
-request_str = request.decode('utf-8', errors='ignore')
+        request_str = request.decode('utf-8', errors='ignore')
 
-# HTTP CONNECT veya normal HTTP isteği kontrolü
-if 'CONNECT' in request_str or 'GET' in request_str or 'HTTP' in request_str:
-# HTTP 200 OK yanıtı gönder
-response = b"HTTP/1.1 200 Connection Established\r\n\r\n"
-client_socket.send(response)
+        # HTTP CONNECT veya normal HTTP isteği kontrolü
+        if 'CONNECT' in request_str or 'GET' in request_str or 'HTTP' in request_str:
+            # HTTP 200 OK yanıtı gönder
+            response = b"HTTP/1.1 200 Connection Established\r\n\r\n"
+            client_socket.send(response)
 
-# SSH sunucusuna bağlan
-ssh_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-ssh_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-ssh_socket.settimeout(30)
+            # SSH sunucusuna bağlan
+            ssh_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ssh_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            ssh_socket.settimeout(30)
 
-try:
-ssh_socket.connect((SSH_HOST, SSH_PORT))
-except Exception as e:
-log(f"SSH bağlantı hatası: {e}")
-return
+            try:
+                ssh_socket.connect((SSH_HOST, SSH_PORT))
+            except Exception as e:
+                log(f"SSH bağlantı hatası: {e}")
+                return
 
-# İki yönlü veri transferi
-client_socket.setblocking(0)
-ssh_socket.setblocking(0)
+            # İki yönlü veri transferi
+            client_socket.setblocking(0)
+            ssh_socket.setblocking(0)
 
-while True:
-try:
-readable, _, exceptional = select.select(
-[client_socket, ssh_socket], [],
-[client_socket, ssh_socket], 30
-)
+            while True:
+                try:
+                    readable, _, exceptional = select.select(
+                        [client_socket, ssh_socket], [],
+                        [client_socket, ssh_socket], 30
+                    )
 
-if exceptional:
-break
+                    if exceptional:
+                        break
 
-for sock in readable:
-if sock is client_socket:
-data = client_socket.recv(BUFFER_SIZE)
-if not data:
-raise Exception("Client disconnected")
-ssh_socket.send(data)
-elif sock is ssh_socket:
-data = ssh_socket.recv(BUFFER_SIZE)
-if not data:
-raise Exception("SSH disconnected")
-client_socket.send(data)
+                    for sock in readable:
+                        if sock is client_socket:
+                            data = client_socket.recv(BUFFER_SIZE)
+                            if not data:
+                                raise Exception("Client disconnected")
+                            ssh_socket.send(data)
+                        elif sock is ssh_socket:
+                            data = ssh_socket.recv(BUFFER_SIZE)
+                            if not data:
+                                raise Exception("SSH disconnected")
+                            client_socket.send(data)
 
-except Exception:
-break
+                except Exception:
+                    break
 
-try:
-ssh_socket.close()
-except:
-pass
+            try:
+                ssh_socket.close()
+            except:
+                pass
 
-except Exception as e:
-pass
-finally:
-with lock:
-active_connections -= 1
-try:
-client_socket.close()
-except:
-pass
+    except Exception as e:
+        pass
+    finally:
+        with lock:
+            active_connections -= 1
+        try:
+            client_socket.close()
+        except:
+            pass
 
 def signal_handler(signum, frame):
-log("Kapatılıyor...")
-sys.exit(0)
+    log("Kapatılıyor...")
+    sys.exit(0)
 
 def main():
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
-try:
-server.bind((LISTEN_HOST, LISTEN_PORT))
-server.listen(100)
-log(f"WebSocket Proxy başlatıldı - Port: {LISTEN_PORT}")
-log(f"SSH Hedef: {SSH_HOST}:{SSH_PORT}")
+    try:
+        server.bind((LISTEN_HOST, LISTEN_PORT))
+        server.listen(100)
+        log(f"WebSocket Proxy başlatıldı - Port: {LISTEN_PORT}")
+        log(f"SSH Hedef: {SSH_HOST}:{SSH_PORT}")
 
-while True:
-try:
-client, address = server.accept()
-thread = threading.Thread(
-target=handle_client,
-args=(client, address),
-daemon=True
-)
-thread.start()
-except Exception as e:
-log(f"Bağlantı hatası: {e}")
+        while True:
+            try:
+                client, address = server.accept()
+                thread = threading.Thread(
+                    target=handle_client,
+                    args=(client, address),
+                    daemon=True
+                )
+                thread.start()
+            except Exception as e:
+                log(f"Bağlantı hatası: {e}")
 
-except Exception as e:
-log(f"Sunucu hatası: {e}")
-sys.exit(1)
+    except Exception as e:
+        log(f"Sunucu hatası: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
-main()
+    main()
 WSEOF
 
 chmod +x /usr/local/bin/ws-proxy.py
