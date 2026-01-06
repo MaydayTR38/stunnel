@@ -667,6 +667,7 @@ configure_dropbear
 create_ssl_certificate
 configure_stunnel
 install_websocket
+install_badvpn
 configure_firewall
 enable_bbr
 
@@ -677,6 +678,131 @@ echo -e "${GREEN}═════════════════════
 show_connection_info
 
 echo -e "${YELLOW}Kullanıcı oluşturmak için 'ssh-vpn' komutunu çalıştırın.${NC}\n"
+}
+
+# BadVPN kurulumu (UDP Desteği)
+install_badvpn() {
+echo -e "\n${YELLOW}[Ek] BadVPN (UDP Desteği) kuruluyor...${NC}"
+
+wget -O /usr/bin/badvpn-udpgw "https://raw.githubusercontent.com/daybreakersx/premscript/master/badvpn-udpgw64" > /dev/null 2>&1
+chmod +x /usr/bin/badvpn-udpgw
+
+cat > /etc/systemd/system/badvpn.service << EOF
+[Unit]
+Description=BadVPN UDP Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 10
+User=root
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start badvpn
+systemctl enable badvpn > /dev/null 2>&1
+
+echo -e "${GREEN}✓ BadVPN kuruldu (UDP Gateway Port: 7300)${NC}"
+}
+
+# Online kullanıcıları göster
+show_online_users() {
+echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${WHITE} ONLINE KULLANICILAR${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+
+printf "%-20s %-15s %-10s\n" "KULLANICI" "DURUM" "PID"
+echo "─────────────────────────────────────────────────────────────"
+
+found=0
+while IFS=: read -r username _ uid _; do
+if [[ $uid -ge 1000 && "$username" != "nobody" ]]; then
+if pgrep -u "$username" > /dev/null 2>&1; then
+pids=$(pgrep -u "$username" | head -n 1) # İlk PID'yi al
+printf "%-20s %-15b %-10s\n" "$username" "${GREEN}● Çevrimiçi${NC}" "$pids"
+found=1
+fi
+fi
+done < /etc/passwd
+
+if [[ $found -eq 0 ]]; then
+echo -e "${YELLOW}Şu an bağlı kullanıcı yok.${NC}"
+fi
+echo ""
+}
+
+# Oto-Reboot yapılandırması
+configure_autoreboot() {
+echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${WHITE} OTO-REBOOT AYARLARI${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+
+echo -e "Sunucunun her gece 00:00'da otomatik yeniden başlatılması"
+echo -e "performansı korur ve RAM şişmesini önler.\n"
+
+if [ -f /etc/cron.d/vpn_autoreboot ]; then
+echo -e "Mevcut Durum: ${GREEN}AKTİF${NC}"
+else
+echo -e "Mevcut Durum: ${RED}PASİF${NC}"
+fi
+echo ""
+
+read -p "Oto-Reboot durumu değiştirilsin mi? (e/h): " choice
+
+if [[ "$choice" == "e" || "$choice" == "E" ]]; then
+if [ -f /etc/cron.d/vpn_autoreboot ]; then
+rm -f /etc/cron.d/vpn_autoreboot
+echo -e "\n${YELLOW}Oto-Reboot iptal edildi.${NC}"
+else
+echo "0 0 * * * root /sbin/reboot" > /etc/cron.d/vpn_autoreboot
+service cron restart > /dev/null 2>&1
+echo -e "\n${GREEN}✓ Oto-Reboot aktif edildi (Her gece 00:00)${NC}"
+fi
+fi
+}
+
+# Hız Testi
+run_speedtest() {
+echo -e "\n${YELLOW}Hız testi başlatılıyor...${NC}"
+echo -e "Lütfen bekleyin, bu işlem biraz sürebilir.\n"
+
+if ! command -v speedtest-cli &> /dev/null; then
+echo -e "Speedtest aracı kuruluyor..."
+apt install speedtest-cli -y > /dev/null 2>&1
+fi
+
+speedtest-cli --simple
+echo ""
+}
+
+# Sistem Temizliği
+clean_system() {
+echo -e "\n${YELLOW}Sistem temizleniyor...${NC}"
+
+# RAM Cache Temizliği
+sync; echo 3 > /proc/sys/vm/drop_caches
+echo -e " ${GREEN}✓${NC} RAM Önbelleği temizlendi"
+
+# Swap Temizliği
+swapoff -a && swapon -a 2>/dev/null
+echo -e " ${GREEN}✓${NC} Swap alanı temizlendi"
+
+# Log Temizliği
+journalctl --vacuum-time=1d > /dev/null 2>&1
+rm -rf /var/log/*.gz > /dev/null 2>&1
+echo -e " ${GREEN}✓${NC} Eski loglar temizlendi"
+
+# Paket Önbelleği
+apt autoremove -y > /dev/null 2>&1
+apt clean -y > /dev/null 2>&1
+echo -e " ${GREEN}✓${NC} Paket artıkları temizlendi"
+
+echo -e "\n${GREEN}Temizlik tamamlandı!${NC}\n"
 }
 
 # Ana menü
@@ -692,26 +818,34 @@ echo -e "${WHITE}║${NC} ${GREEN}[1]${NC} Tam Kurulum (İlk Kurulum) ${WHITE}�
 echo -e "${WHITE}║${NC} ${GREEN}[2]${NC} Kullanıcı Oluştur ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${GREEN}[3]${NC} Kullanıcı Sil ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${GREEN}[4]${NC} Kullanıcı Listesi ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${GREEN}[5]${NC} Servis Durumu ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${GREEN}[6]${NC} Servisleri Yeniden Başlat ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${GREEN}[7]${NC} Bağlantı Bilgileri ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${GREEN}[8]${NC} BBR Aktifleştir ${WHITE}║${NC}"
-echo -e "${WHITE}║${NC} ${RED}[9]${NC} Kaldır ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[5]${NC} Online Kullanıcılar ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[6]${NC} Servis Durumu ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[7]${NC} Servisleri Yeniden Başlat ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[8]${NC} Bağlantı Bilgileri ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[9]${NC} BBR Aktifleştir ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[10]${NC} Oto-Reboot Ayarı ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[11]${NC} Sunucu Hız Testi ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${GREEN}[12]${NC} Sistem Temizliği (RAM/Log) ${WHITE}║${NC}"
+echo -e "${WHITE}║${NC} ${RED}[13]${NC} Kaldır ${WHITE}║${NC}"
 echo -e "${WHITE}║${NC} ${PURPLE}[0]${NC} Çıkış ${WHITE}║${NC}"
 echo -e "${WHITE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-read -p "Seçiminiz [0-9]: " choice
+read -p "Seçiminiz [0-13]: " choice
 
 case $choice in
 1) full_install; read -p "Devam etmek için Enter'a basın..." ;;
 2) create_user; read -p "Devam etmek için Enter'a basın..." ;;
 3) delete_user; read -p "Devam etmek için Enter'a basın..." ;;
 4) list_users; read -p "Devam etmek için Enter'a basın..." ;;
-5) service_status; read -p "Devam etmek için Enter'a basın..." ;;
-6) restart_services; read -p "Devam etmek için Enter'a basın..." ;;
-7) show_connection_info; read -p "Devam etmek için Enter'a basın..." ;;
-8) enable_bbr; read -p "Devam etmek için Enter'a basın..." ;;
-9) uninstall; read -p "Devam etmek için Enter'a basın..." ;;
+5) show_online_users; read -p "Devam etmek için Enter'a basın..." ;;
+6) service_status; read -p "Devam etmek için Enter'a basın..." ;;
+7) restart_services; read -p "Devam etmek için Enter'a basın..." ;;
+8) show_connection_info; read -p "Devam etmek için Enter'a basın..." ;;
+9) enable_bbr; read -p "Devam etmek için Enter'a basın..." ;;
+10) configure_autoreboot; read -p "Devam etmek için Enter'a basın..." ;;
+11) run_speedtest; read -p "Devam etmek için Enter'a basın..." ;;
+12) clean_system; read -p "Devam etmek için Enter'a basın..." ;;
+13) uninstall; read -p "Devam etmek için Enter'a basın..." ;;
 0) echo -e "\n${GREEN}Görüşmek üzere!${NC}\n"; exit 0 ;;
 *) echo -e "${RED}Geçersiz seçim!${NC}"; sleep 1 ;;
 esac
