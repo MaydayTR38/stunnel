@@ -99,7 +99,12 @@ echo -e "${GREEN}✓ Sistem güncellendi${NC}"
 install_packages() {
 echo -e "\n${YELLOW}[2/8] Gerekli paketler kuruluyor...${NC}"
 
-PACKAGES="wget curl openssl stunnel4 dropbear openssh-server python3 net-tools ufw fail2ban"
+# /bin/false'i shells dosyasına ekle (Dropbear auth hatası için)
+if ! grep -q "/bin/false" /etc/shells; then
+echo "/bin/false" >> /etc/shells
+fi
+
+PACKAGES="wget curl openssl stunnel4 dropbear openssh-server python3 net-tools ufw fail2ban lsb-release"
 
 for pkg in $PACKAGES; do
 apt install -y $pkg > /dev/null 2>&1
@@ -715,8 +720,9 @@ done
 
 # Script'i global komut olarak ekle
 create_command() {
+cp "$0" /usr/local/bin/ssh-vpn-installer.sh 2>/dev/null
+chmod +x /usr/local/bin/ssh-vpn-installer.sh 2>/dev/null
 ln -sf /usr/local/bin/ssh-vpn-installer.sh /usr/local/bin/ssh-vpn 2>/dev/null
-chmod +x /usr/local/bin/ssh-vpn 2>/dev/null
 }
 
 # Ana fonksiyon
