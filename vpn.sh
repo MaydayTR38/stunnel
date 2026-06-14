@@ -483,6 +483,35 @@ echo "y" | ufw enable > /dev/null 2>&1
 echo -e "${GREEN}✓ Güvenlik duvarı yapılandırıldı${NC}"
 }
 
+# Fail2ban güvenlik kalkanı yapılandırması
+configure_fail2ban() {
+echo -e "\n${YELLOW}Fail2ban güvenlik kalkanı yapılandırılıyor...${NC}"
+
+# Dropbear ve SSHD için koruma kurallarını oluştur/güncelle
+cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+banaction = ufw
+
+[sshd]
+enabled = true
+port = $SSH_PORT
+
+[dropbear]
+enabled = true
+port = $DROPBEAR_PORT
+logpath = /var/log/auth.log
+maxretry = 3
+EOF
+
+systemctl restart fail2ban
+systemctl enable fail2ban > /dev/null 2>&1
+
+echo -e "${GREEN}✓ Fail2ban başarıyla yapılandırıldı! (SSHD ve Dropbear koruması aktif)${NC}"
+}
+
 # BBR optimizasyonu
 enable_bbr() {
 echo -e "\n${YELLOW}BBR Congestion Control aktifleştiriliyor...${NC}"
@@ -764,6 +793,7 @@ configure_stunnel
 install_websocket
 install_badvpn
 configure_firewall
+configure_fail2ban
 enable_bbr
 
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
