@@ -92,7 +92,7 @@ echo -e "${NC}"
 
 # Sistem bilgisi
 show_system_info() {
-IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "Bilinmiyor")
+IP=$(curl -4 -s ifconfig.me 2>/dev/null || curl -4 -s ipinfo.io/ip 2>/dev/null || curl -4 -s api.ipify.org 2>/dev/null || echo "Bilinmiyor")
 OS=$(lsb_release -ds 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
 KERNEL=$(uname -r)
 RAM=$(free -m | awk 'NR==2{printf "%.1fGB", $2/1024}')
@@ -129,6 +129,18 @@ echo ""
 # Sistem güncelleme
 update_system() {
 echo -e "\n${YELLOW}[1/8] Sistem güncelleniyor...${NC}"
+
+# IPv4 Önceliği ve APT IPv4 Ayarı
+echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+if [ -f /etc/gai.conf ]; then
+sed -i 's/#precedence ::ffff:0:0\/96 100/precedence ::ffff:0:0\/96 100/' /etc/gai.conf
+if ! grep -q "precedence ::ffff:0:0/96 100" /etc/gai.conf; then
+echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf
+fi
+else
+echo "precedence ::ffff:0:0/96 100" > /etc/gai.conf
+fi
+
 if ! apt-get update -y > /dev/null 2>&1; then
 log_error "Paket listesi güncellenemedi."
 return 1
@@ -177,6 +189,7 @@ fi
 cat > /etc/ssh/sshd_config << EOF
 # SSH VPN Configuration
 Port $SSH_PORT
+AddressFamily inet
 PermitRootLogin yes
 PasswordAuthentication yes
 PermitEmptyPasswords no
@@ -579,7 +592,7 @@ else
 echo -e "\n${GREEN}✓ Kullanıcı oluşturuldu (Sınırsız)${NC}"
 fi
 
-IP=$(curl -s ifconfig.me 2>/dev/null)
+IP=$(curl -4 -s ifconfig.me 2>/dev/null || curl -4 -s api.ipify.org 2>/dev/null || echo "Bilinmiyor")
 
 echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${WHITE} BAĞLANTI BİLGİLERİ${NC}"
@@ -701,7 +714,7 @@ echo -e "${GREEN}✓ Tüm servisler yeniden başlatıldı${NC}"
 
 # Bağlantı bilgileri
 show_connection_info() {
-IP=$(curl -s ifconfig.me 2>/dev/null || echo "Bilinmiyor")
+IP=$(curl -4 -s ifconfig.me 2>/dev/null || curl -4 -s api.ipify.org 2>/dev/null || echo "Bilinmiyor")
 
 echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${WHITE} BAĞLANTI AYARLARI${NC}"
@@ -809,7 +822,7 @@ echo -e "${YELLOW}Kullanıcı oluşturmak için 'ssh-vpn' komutunu çalıştır�
 install_badvpn() {
 echo -e "\n${YELLOW}[Ek] BadVPN (UDP Desteği) kuruluyor...${NC}"
 
-wget -O /usr/bin/badvpn-udpgw "https://raw.githubusercontent.com/daybreakersx/premscript/master/badvpn-udpgw64" > /dev/null 2>&1
+wget -4 -O /usr/bin/badvpn-udpgw "https://raw.githubusercontent.com/daybreakersx/premscript/master/badvpn-udpgw64" > /dev/null 2>&1
 chmod +x /usr/bin/badvpn-udpgw
 
 cat > /etc/systemd/system/badvpn.service << EOF
@@ -941,7 +954,7 @@ UPDATE_URL="https://raw.githubusercontent.com/MaydayTR38/stunnel/refs/heads/main
 cp "$0" "${0}.backup"
 
 echo -e "Güncelleme indiriliyor..."
-if wget -q "$UPDATE_URL" -O /tmp/vpn-new.sh; then
+if wget -4 -q "$UPDATE_URL" -O /tmp/vpn-new.sh; then
 if [ -s /tmp/vpn-new.sh ]; then
 mv /tmp/vpn-new.sh "$0"
 chmod +x "$0"
